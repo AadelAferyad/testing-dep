@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Better Campus Booker</title>
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: #fff;
+
+            display: flex;
+            justify-content: center;
+            align-items: center;
+
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            padding: 25px;
+        }
+
+        .card {
+            background: #1c1c1c;
+            border-radius: 16px;
+            padding: 30px;
+        }
+
+        h1 {
+            margin-top: 0;
+            margin-bottom: 8px;
+        }
+
+        .description {
+            color: #aaa;
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-top: 18px;
+            margin-bottom: 7px;
+            color: #ccc;
+        }
+
+        select,
+        input {
+            width: 100%;
+            padding: 12px;
+
+            border: 1px solid #444;
+            border-radius: 8px;
+
+            background: #111;
+            color: white;
+
+            font-size: 16px;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 25px;
+            padding: 13px;
+
+            border: none;
+            border-radius: 8px;
+
+            background: #fff;
+            color: #111;
+
+            font-size: 16px;
+            font-weight: bold;
+
+            cursor: pointer;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button.stop {
+            background: #444;
+            color: white;
+        }
+
+        .status {
+            margin-top: 25px;
+            padding: 15px;
+
+            border-radius: 8px;
+
+            background: #111;
+
+            min-height: 70px;
+        }
+
+        .status-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .details {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="card">
+
+        <h1>Better Campus Booker</h1>
+
+        <div class="description">
+            Watch a slot and automatically reserve it
+            when it becomes available.
+        </div>
+
+
+        <label for="sport">
+            Sport
+        </label>
+
+        <select id="sport">
+
+            <option value="gym">
+                Gym
+            </option>
+
+            <option value="thai">
+                Thai
+            </option>
+
+        </select>
+
+
+        <label for="date">
+            Date
+        </label>
+
+        <input
+            id="date"
+            type="date"
+        >
+
+
+        <label for="time">
+            Start time
+        </label>
+
+        <input
+            id="time"
+            type="time"
+        >
+
+
+        <label for="interval">
+            Check every
+        </label>
+
+        <select id="interval">
+
+            <option value="30">
+                30 seconds
+            </option>
+
+            <option value="60">
+                1 minute
+            </option>
+
+            <option value="120">
+                2 minutes
+            </option>
+
+        </select>
+
+
+        <button id="startButton">
+            Start watching
+        </button>
+
+
+        <div class="status">
+
+            <div
+                id="statusTitle"
+                class="status-title"
+            >
+                Idle
+            </div>
+
+            <div
+                id="statusDetails"
+                class="details"
+            >
+                Choose your sport, date and time.
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    let timer = null;
+    let running = false;
+
+
+    const sportInput =
+        document.getElementById("sport");
+
+    const dateInput =
+        document.getElementById("date");
+
+    const timeInput =
+        document.getElementById("time");
+
+    const intervalInput =
+        document.getElementById("interval");
+
+    const button =
+        document.getElementById("startButton");
+
+    const statusTitle =
+        document.getElementById("statusTitle");
+
+    const statusDetails =
+        document.getElementById("statusDetails");
+
+
+    function setStatus(title, details) {
+
+        statusTitle.textContent = title;
+        statusDetails.textContent = details;
+
+    }
+
+
+async function checkSlot() {
+
+    const sport = sportInput.value;
+    const date = dateInput.value;
+    const time = timeInput.value;
+
+    if (!date || !time) {
+        setStatus(
+            "Missing information",
+            "Please select a date and time."
+        );
+
+        stopWatching();
+        return;
+    }
+
+    setStatus(
+        "Checking...",
+        `Checking ${sport} on ${date} at ${time}`
+    );
+
+    try {
+
+        const response = await fetch("/api/check", {
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                sport: sport,
+                date: date,
+                time: time
+            })
+        });
+
+        console.log("HTTP status:", response.status);
+
+        const text = await response.text();
+
+        console.log("Server response:", text);
+
+        let data;
+
+        try {
+            data = JSON.parse(text);
+        } catch {
+            throw new Error(
+                `Server returned non-JSON response (${response.status})`
+            );
+        }
+
+        if (data.status === "booked") {
+
+            setStatus(
+                "✅ BOOKED!",
+                `${data.sport} | ${data.date} | ${data.time}`
+            );
+
+            stopWatching();
+            return;
+        }
+
+        if (data.status === "waiting") {
+
+            let availability = "";
+
+            if (
+                data.available !== null &&
+                data.capacity !== null
+            ) {
+                availability =
+                    ` ${data.available}/${data.capacity} available.`;
+            }
+
+            setStatus(
+                "⏳ Slot unavailable",
+                data.message + availability
+            );
+
+            return;
+        }
+
+        if (data.status === "not_found") {
+
+            setStatus(
+                "❓ Slot not found",
+                data.message
+            );
+
+            return;
+        }
+
+        setStatus(
+            "❌ Error",
+            data.message || "Unknown error."
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        setStatus(
+            "❌ Request failed",
+            error.message
+        );
+    }
+}
+
+    function startWatching() {
+
+        if (running) {
+            return;
+        }
+
+
+        if (
+            !dateInput.value ||
+            !timeInput.value
+        ) {
+
+            setStatus(
+                "Missing information",
+                "Choose a date and time first."
+            );
+
+            return;
+
+        }
+
+
+        running = true;
+
+        button.textContent =
+            "Stop watching";
+
+        button.classList.add(
+            "stop"
+        );
+
+
+        // Check immediately.
+
+        checkSlot();
+
+
+        // Then check repeatedly.
+
+        const interval =
+            Number(intervalInput.value);
+
+
+        timer = setInterval(
+            checkSlot,
+            interval * 1000
+        );
+
+    }
+
+
+    function stopWatching() {
+
+        running = false;
+
+
+        if (timer !== null) {
+
+            clearInterval(timer);
+
+            timer = null;
+
+        }
+
+
+        button.textContent =
+            "Start watching";
+
+        button.classList.remove(
+            "stop"
+        );
+
+    }
+
+
+    button.addEventListener(
+        "click",
+        () => {
+
+            if (running) {
+
+                stopWatching();
+
+                setStatus(
+                    "Stopped",
+                    "Automatic checking has stopped."
+                );
+
+            } else {
+
+                startWatching();
+
+            }
+
+        }
+    );
+
+</script>
+
+</body>
+
+</html>
