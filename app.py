@@ -4,6 +4,7 @@ import json
 import requests
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 
@@ -21,7 +22,14 @@ SPORTS = {
 
 NEXT_ACTION = "702932d38981fc7306e6a3cb45516f4f5e7e10d6bb"
 
-COOKIE = os.environ["BETTER_CAMPUS_COOKIE"]
+
+# --------------------------------------------------
+# FRONTEND
+# --------------------------------------------------
+
+@app.get("/")
+def home():
+    return FileResponse("index.html")
 
 
 # --------------------------------------------------
@@ -35,10 +43,27 @@ class BookingRequest(BaseModel):
 
 
 # --------------------------------------------------
+# Get authentication cookie
+# --------------------------------------------------
+
+def get_cookie():
+    cookie = os.environ.get("BETTER_CAMPUS_COOKIE")
+
+    if not cookie:
+        raise RuntimeError(
+            "BETTER_CAMPUS_COOKIE environment variable is missing."
+        )
+
+    return cookie
+
+
+# --------------------------------------------------
 # Get slots
 # --------------------------------------------------
 
 def get_slots(date: str, allowance_id: int):
+
+    cookie = get_cookie()
 
     url = f"{BASE_URL}/services/{SERVICE_ID}/{allowance_id}"
 
@@ -46,7 +71,7 @@ def get_slots(date: str, allowance_id: int):
         url,
         params={"date": date},
         headers={
-            "Cookie": f"t={COOKIE}",
+            "Cookie": f"t={cookie}",
             "User-Agent": "Mozilla/5.0",
         },
         timeout=15,
@@ -86,6 +111,8 @@ def reserve(
     allowance_id: int,
 ):
 
+    cookie = get_cookie()
+
     url = f"{BASE_URL}/services/{SERVICE_ID}/{allowance_id}"
 
     headers = {
@@ -98,7 +125,7 @@ def reserve(
             f"?date={date}"
         ),
         "next-action": NEXT_ACTION,
-        "Cookie": f"t={COOKIE}",
+        "Cookie": f"t={cookie}",
         "User-Agent": "Mozilla/5.0",
     }
 
@@ -121,7 +148,7 @@ def reserve(
 
 
 # --------------------------------------------------
-# Parse booking result
+# Parse reservation response
 # --------------------------------------------------
 
 def parse_reservation_response(response: str):
@@ -141,13 +168,16 @@ def parse_reservation_response(response: str):
 
 
 # --------------------------------------------------
-# API endpoint
+# API
 # --------------------------------------------------
 
 @app.post("/api/check")
 def check_booking(request: BookingRequest):
 
+    # ----------------------------------------------
     # Validate sport
+    # ----------------------------------------------
+
     if request.sport not in SPORTS:
         return {
             "status": "error",
@@ -174,7 +204,7 @@ def check_booking(request: BookingRequest):
             }
 
         # ------------------------------------------
-        # Find requested time
+        # Find target slot
         # ------------------------------------------
 
         target = next(
@@ -195,6 +225,10 @@ def check_booking(request: BookingRequest):
                 ),
             }
 
+        # ------------------------------------------
+        # Availability
+        # ------------------------------------------
+
         capacity = target.get("capacity")
         reserved_count = target.get("reserved")
 
@@ -204,17 +238,21 @@ def check_booking(request: BookingRequest):
             isinstance(capacity, int)
             and isinstance(reserved_count, int)
         ):
-            available = capacity - reserved_count
+            available = (
+                capacity - reserved_count
+            )
 
         # ------------------------------------------
-        # Not bookable
+        # Slot unavailable
         # ------------------------------------------
 
         if not target.get("canBook"):
 
             return {
                 "status": "waiting",
-                "message": "Slot is not currently available.",
+                "message": (
+                    "Slot is not currently available."
+                ),
                 "sport": request.sport,
                 "date": request.date,
                 "time": request.time,
@@ -222,11 +260,13 @@ def check_booking(request: BookingRequest):
                 "available": available,
                 "capacity": capacity,
                 "reserved": reserved_count,
-                "waiting_list": target.get("waitingList"),
+                "waiting_list": target.get(
+                    "waitingList"
+                ),
             }
 
         # ------------------------------------------
-        # Available -> reserve
+        # Slot is available
         # ------------------------------------------
 
         response = reserve(
@@ -243,11 +283,17 @@ def check_booking(request: BookingRequest):
 
             return {
                 "status": "error",
-                "message": "Could not parse reservation response.",
+                "message": (
+                    "Could not parse reservation response."
+                ),
                 "raw": response,
             }
 
         success, message = result
+
+        # ------------------------------------------
+        # Successfully booked
+        # ------------------------------------------
 
         if success:
 
@@ -260,7 +306,10 @@ def check_booking(request: BookingRequest):
                 "slot_id": target["id"],
             }
 
-        # Someone may have taken it between GET and POST
+        # ------------------------------------------
+        # Booking failed
+        # ------------------------------------------
+
         return {
             "status": "waiting",
             "message": message,
@@ -274,7 +323,9 @@ def check_booking(request: BookingRequest):
 
         return {
             "status": "error",
-            "message": str(error),
+            "message": (
+                f"Better Campus request failed: {error}"
+            ),
         }
 
     except Exception as error:
